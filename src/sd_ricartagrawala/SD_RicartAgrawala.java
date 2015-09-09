@@ -33,10 +33,7 @@ public class SD_RicartAgrawala {
 		Processo.processos.get(0).setQueroUsar("recurso1");
 		Processo.processos.get(1).setQueroUsar("recurso1");
 		Processo.processos.get(2).setQueroUsar("recurso1");
-		//Processo.processos.get(1).setQueroUsar("recurso2");
-		//Processo.processos.get(3).setQueroUsar("recurso1");
-		//Processo.processos.get(3).setQueroUsar("recurso2");
-		
+		Processo.processos.get(1).setQueroUsar("recurso2");
 		
 		for(Processo p : Processo.processos)
 			p.join();

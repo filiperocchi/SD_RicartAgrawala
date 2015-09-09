@@ -158,8 +158,8 @@ public class Processo extends Thread
 			else
 			{
 				// SE EU FOR MENOR, COLOCO MSG NA FILA msgsEsperando
-				//if(tsCriticalSection < msg.tempoRemetente)
-				if(idProcesso < msg.idRemetente)
+				if(tsCriticalSection < msg.tempoRemetente)
+				//if(idProcesso < msg.idRemetente)
 				{
 					System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" "
 									   + "recurso '"+msg.conteudo+"' | não está usando o recurso mas quero acessar, sou menor e enfileirei msg");
