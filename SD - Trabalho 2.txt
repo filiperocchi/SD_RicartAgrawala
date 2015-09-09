@@ -1,0 +1,60 @@
+SD - Trabalho 2 - Algoritmo Distribuído Ricart e Agrawala
+
+Processo quer acessar recurso compartilhado
+	gera mensagem com nome do recurso, seu número de processo, e o relógio lógico próprio
+	envia mensagem pra todos incluso ele
+
+Processo recebe mensagem de requisição de recurso (3 opções):
+	se está usando: enfileira e continua de boa usando o recurso.
+	se não está usando:
+		se não quer: manda OK.
+		se quer: compara relógio lógico (próprio contra o da mensagem), menor vence,
+			se o outro for menor manda OK pra ele.
+			se for o menor, enfileira mensagem e não responde.
+
+
+necessário:
+
+classe Processo
+{
+	lista processos -ok
+	lista mensagens -ok
+	lista okays por mensagem -tipo o ack de antes (praticamente ok)
+
+	flag usando recurso
+	string recurso sendo usado
+
+	método mandar mensagem -o mesmo praticamente, vai mudar a composição da mensagem
+
+	método receber mensagem
+	{
+		alterar para os 3 casos:
+
+		se está usando: enfileira e continua de boa usando o recurso.
+		se não está usando:
+			se não quer: manda OK.
+			se quer: compara relógio lógico (próprio contra o da mensagem), menor vence,
+				se o outro for menor manda OK pra ele.
+				se for o menor, enfileira mensagem e não responde.
+	}
+
+	método mandar ok - necessário criar a classe também
+
+	método receber ok -desconta dos necessários da mensagem == esquema dos ACKs
+
+}
+
+classe Mensagem
+{
+	atributos: 
+		nome recurso
+		num processo remetente
+		relógio do processo (momento de envio da mensagem)
+}
+
+classe OK
+{
+	// criar só para ter um objeto para mandar, ou nem precisa, dá pra simular apenas com a chamada de método
+}
+
+classe Aplicação - remover // serão só prints no Processo
