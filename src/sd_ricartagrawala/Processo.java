@@ -7,15 +7,11 @@
  */
 package sd_ricartagrawala;
 
-import static java.lang.Math.max;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Random;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 
@@ -25,49 +21,56 @@ public class Processo extends Thread
 
 	public static ArrayList<Processo> processos = new ArrayList<>();
 	public int idProcesso;
-	private Aplicacao aplicacao;
+	
+	private Queue<String> filaRecursosRequisitados;
 
-	private Queue<Mensagem> filaMsgsOksFaltando;
+	private Queue<Mensagem> filaMsgsEsperandoOks;
 	private HashMap<Integer, ArrayList<Integer>> mapMsgIdToOkList; // id da mensagem, lista de ids de processos que faltam dar ok
 	//(conjunto de oks faltando, e quando vazio está pronta?)
 	
-	private Queue<Mensagem> msgToDo;
+	private Queue<Mensagem> msgInBuffer;
 	
-	private boolean msgQueroJaEnviada;
 	private String recursoQueroUsar;
 	private String recursoSendoUsado;
-	private Queue<Mensagem> msgsEsperando;
+	private Queue<Mensagem> requestsNegadosEsperando;
+	
+	private int tsCriticalSection;
 
 	private int relogioLogico;
 	
 	private long countdown;
 	
+	public boolean initAuth;
+	
 	public Processo(int i)
 	{
-		processos.add(this);
-		
 		idProcesso = i;
-		aplicacao = new Aplicacao(idProcesso);
+		
+		filaRecursosRequisitados = new LinkedList<>();
 
-		filaMsgsOksFaltando = new LinkedList<Mensagem>();
+		filaMsgsEsperandoOks = new LinkedList<Mensagem>();
 		mapMsgIdToOkList = new HashMap<Integer, ArrayList<Integer>>();
 		
-		msgToDo = new ConcurrentLinkedQueue<>();
+		msgInBuffer = new ConcurrentLinkedQueue<>();
 
-		msgQueroJaEnviada = true;
 		recursoQueroUsar = "";
 		recursoSendoUsado = "";
-		msgsEsperando = new LinkedList<>();
+		requestsNegadosEsperando = new LinkedList<>();
 		
-		relogioLogico = 0+i;
+		tsCriticalSection = -1;
+		
+		relogioLogico = 0+i*9;
 		
 		countdown = -1;
+		
+		processos.add(this);
+		
+		initAuth = false;
 	}
 	
 	public void setQueroUsar(String s)
 	{
-		recursoQueroUsar = s;
-		msgQueroJaEnviada = false;
+		filaRecursosRequisitados.add(s);
 	}
 	
 	public void liberarRecursoAtual()
@@ -75,7 +78,7 @@ public class Processo extends Thread
 		System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") liberando recurso '"+recursoSendoUsado+"'");
 		recursoSendoUsado = "";
 		
-		for(Mensagem msg : msgsEsperando)
+		for(Mensagem msg : requestsNegadosEsperando)
 		{
 			ArrayList<Integer> missingOks = processos.get(msg.idRemetente).mapMsgIdToOkList.get(msg.id); // lista de oks faltando da msg que foi ok
 			if(missingOks != null)
@@ -84,7 +87,14 @@ public class Processo extends Thread
 				throw new RuntimeException();
 		}
 		
-		msgsEsperando.clear();
+		tsCriticalSection = -1;
+		
+		requestsNegadosEsperando.clear();
+		
+		if(recursoQueroUsar.equals("") && recursoSendoUsado.equals("") && !filaRecursosRequisitados.isEmpty())
+		{
+			enviarMensagemQuero(filaRecursosRequisitados.poll());
+		}
 	}
 	
 	public void enviarMensagemQuero(String nomeRecurso)
@@ -93,7 +103,7 @@ public class Processo extends Thread
 		
 		Mensagem msg = criarMensagem(idProcesso, relogioLogico, nomeRecurso);
 
-		filaMsgsOksFaltando.add(msg);
+		filaMsgsEsperandoOks.add(msg);
 
 		// CRIAR LISTA DE OKS FALTANDO
 		ArrayList<Integer> listaOksFaltando = new ArrayList<>();
@@ -107,24 +117,23 @@ public class Processo extends Thread
 		
 		//System.out.println("PROCESSO "+idProcesso+": enviando msg "+msg.id);
 		
+		recursoQueroUsar = nomeRecurso;
+		
+		tsCriticalSection = relogioLogico;
+		
 		for(Processo p : processos)
 			p.receberMensagem(msg);
-
-		msgQueroJaEnviada = true;
 	}
 	public void receberMensagem(Mensagem m)
 	{
-		//synchronized(this){
-			msgToDo.add(new Mensagem(m));
-		//}
+		msgInBuffer.add(new Mensagem(m));
 	}
 	
 	public void processarMensagem()
 	{
 		Mensagem msg;
-		//synchronized(this){
-			msg = msgToDo.poll();
-		//}
+		
+		msg = msgInBuffer.poll();
 		
 		relogioLogico++;
 		
@@ -132,13 +141,15 @@ public class Processo extends Thread
 		if(!recursoSendoUsado.equals(msg.conteudo))
 		{
 			// E NEM QUERO ACESSAR, RESPONDO OK
-			if(!recursoQueroUsar.equals(msg.conteudo))
+			if(!recursoQueroUsar.equals(
+					msg.conteudo))
 			{
-				System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" recurso '"+msg.conteudo+"' | não está usando o recurso e nem quero acessar");
+				System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+
+								   " recurso '"+msg.conteudo+"' | não está usando o recurso e nem quero acessar");
 				
-				ArrayList<Integer> missingOks = processos.get(msg.idRemetente).mapMsgIdToOkList.get(msg.id); // lista de oks faltando da msg que foi ok
+				ArrayList<Integer> missingOks = processos.get(msg.idRemetente).mapMsgIdToOkList.get(msg.id); // lista de oks faltando da msg de request
 				if(missingOks != null)
-					missingOks.remove(new Integer(idProcesso));
+					missingOks.remove(new Integer(idProcesso)); // remove indicação de que esse processo ainda não deu ok
 				else
 					throw new RuntimeException();
 			}
@@ -147,17 +158,20 @@ public class Processo extends Thread
 			else
 			{
 				// SE EU FOR MENOR, COLOCO MSG NA FILA msgsEsperando
-				if(relogioLogico < msg.tempoRemetente)
+				//if(tsCriticalSection < msg.tempoRemetente)
+				if(idProcesso < msg.idRemetente)
 				{
-					System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" recurso '"+msg.conteudo+"' | não está usando o recurso mas quero acessar, sou menor e enfileirei msg");
+					System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" "
+									   + "recurso '"+msg.conteudo+"' | não está usando o recurso mas quero acessar, sou menor e enfileirei msg");
 					
-					msgsEsperando.add(msg);
+					requestsNegadosEsperando.add(msg);
 				}
 
 				// SE EU FOR MAIOR, MANDO OK
 				else
 				{
-					System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" recurso '"+msg.conteudo+"' | não está usando o recurso mas quero acessar, sou maior e mando ok");
+					System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" "
+									   + "recurso '"+msg.conteudo+"' | não está usando o recurso mas quero acessar, sou maior e mando ok");
 					
 					ArrayList<Integer> missingOks = processos.get(msg.idRemetente).mapMsgIdToOkList.get(msg.id); // lista de oks faltando da msg que foi ok
 					if(missingOks != null)
@@ -165,15 +179,19 @@ public class Processo extends Thread
 					else
 						throw new RuntimeException();
 				}
+				
+				if(tsCriticalSection == -1)
+					throw new RuntimeException();
 			}
 		}
 		
 		// SE ESTOU USANDO O RECURSO, COLOCA NA FILA msgsEsperando
 		else
 		{
-			System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" recurso '"+msg.conteudo+"' | estou usando o recurso, enfileirei msg");
+			System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") processando msg ("+msg.tempoRemetente+") "+msg.id+" "
+							   + "recurso '"+msg.conteudo+"' | estou usando o recurso, enfileirei msg");
 			
-			msgsEsperando.add(msg);
+			requestsNegadosEsperando.add(msg);
 		}
 	}
 	
@@ -183,6 +201,9 @@ public class Processo extends Thread
 		synchronized(this){
 			System.out.println("Started process "+idProcesso);
 		}
+		
+		while(initAuth == false)
+		{System.out.print("");}
 		
 		while(true)
 		{
@@ -194,12 +215,17 @@ public class Processo extends Thread
 						if(!p1.recursoSendoUsado.equals("") && 
 						   !p2.recursoSendoUsado.equals("") && 
 						   p1.recursoSendoUsado.equals(p2.recursoSendoUsado))
-							System.out.println(">>CONFLITO DE USO<<");
+						{
+							throw new RuntimeException(">>CONFLITO DE USO<<");
+						}
 					}
 				}
 			
 			if(countdown > 0)
+			{
 				countdown--;
+				//System.out.println(countdown);
+			}
 			
 			if(countdown == 0)
 			{
@@ -207,19 +233,19 @@ public class Processo extends Thread
 				countdown = -1;
 			}
 			
-			while(!msgToDo.isEmpty())
+			while(!msgInBuffer.isEmpty())
 				processarMensagem();
 			
-			if(!recursoQueroUsar.equals("") && !msgQueroJaEnviada)
+			if(recursoQueroUsar.equals("") && recursoSendoUsado.equals("") && !filaRecursosRequisitados.isEmpty())
 			{
-				enviarMensagemQuero(recursoQueroUsar);
+				enviarMensagemQuero(filaRecursosRequisitados.poll());
 			}
 			
-			if(filaMsgsOksFaltando.peek() != null)
+			if(filaMsgsEsperandoOks.peek() != null)
 			{
-				if(mapMsgIdToOkList.get(filaMsgsOksFaltando.peek().id) != null)
+				if(mapMsgIdToOkList.get(filaMsgsEsperandoOks.peek().id) != null)
 				{
-					if(mapMsgIdToOkList.get(filaMsgsOksFaltando.peek().id).isEmpty())
+					if(mapMsgIdToOkList.get(filaMsgsEsperandoOks.peek().id).isEmpty())
 					{
 						relogioLogico++;
 
@@ -228,22 +254,22 @@ public class Processo extends Thread
 						
 						Random rand = new Random();
 						
-						countdown = 10000000 + rand.nextInt(2000000000);
+						countdown = 100000 + rand.nextInt(2000000);
 
 						System.out.println("PROCESSO "+idProcesso+": (relogio "+relogioLogico+") Utilizando recurso '"+recursoSendoUsado+"'");
 
-						mapMsgIdToOkList.remove(filaMsgsOksFaltando.peek().id);
-						filaMsgsOksFaltando.poll();
+						mapMsgIdToOkList.remove(filaMsgsEsperandoOks.peek().id);
+						filaMsgsEsperandoOks.poll();
 					}
 					else
 					{
-						System.out.println(filaMsgsOksFaltando.peek().id + " --- "+mapMsgIdToOkList.get(filaMsgsOksFaltando.peek().id));
+						//System.out.println(filaMsgsOksFaltando.peek().id + " --- "+mapMsgIdToOkList.get(filaMsgsOksFaltando.peek().id));
 					}
 				}
 				
 				else
 				{
-					throw new RuntimeException("MSG "+filaMsgsOksFaltando.peek().id+" SEM LISTA DE OKS");
+					throw new RuntimeException("MSG "+filaMsgsEsperandoOks.peek().id+" SEM LISTA DE OKS");
 				}
 			}
 		}
