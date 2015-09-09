@@ -25,7 +25,10 @@ public class SD_RicartAgrawala {
 		for(Processo p : Processo.processos)
 			p.start();
 		
-		//Processo.processos.get(0).enviarMensagem(UUID.randomUUID().toString());
+		Processo.processos.get(0).setQueroUsar("recurso1");
+		Processo.processos.get(1).setQueroUsar("recurso1");
+		//Processo.processos.get(2).setQueroUsar("recurso1");
+		
 		
 		for(Processo p : Processo.processos)
 			p.join();
